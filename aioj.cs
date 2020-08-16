@@ -153,6 +153,11 @@ public class jlexer {
     }    
 }
 
+public class jparser {
+    private IEnumerator<jlexer.Token> tokens;
+    
+}
+
 public class AIOJ {    
     public static void Main(string[] args) {
         Console.WriteLine("Hello world");
