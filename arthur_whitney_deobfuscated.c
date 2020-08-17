@@ -1,6 +1,13 @@
 //Includes to get rid of warnings
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h> //For intptr_t
+#include <inttypes.h> //For printf format strings
+#include <string.h>
+
+//Change this to the right printf specifier depending on the size of an 
+//intptr_t on your machine
+#define NUM_FORMAT "%d"
 
 //BAD BAD BAD: this code has memory leaks from here til second coming!
 
@@ -10,7 +17,7 @@
 //its p[] array can either store numbers (for regular arrays) or pointers
 //(for arrays of boxes). I kept the original "I" typedef that Arthur Whitney
 //used originally.
-typedef I intptr_t;
+typedef intptr_t I;
 
 //I think this is supposed to be a multi-dimensional array, but I haven't
 //been able to reverse-engineer the meaning of the fields yet.
@@ -56,7 +63,7 @@ void mv(I *d, I *s, int n) {
 //Takes r elements from array d and returns their product. The r must stand
 //for "rank" and the d for "dimensions". I'm guessing it's called tr stands
 //for "trace".
-void tr(int r, I *d) {
+int tr(int r, I *d) {
     I z = 1;
     int i;
     
@@ -164,7 +171,7 @@ A cat(A a, A w) {
     I wn = tr(w->r, w->d); //Number of elements in w
     I n  = an + wn; //Number of elements in the result
     
-    A z = ga(1, &n); //Create a rank-1 array with n elements
+    A z = ga(w->t, 1, &n); //Create a rank-1 array with n elements
     
     mv(z->p,a->p,an);       //Copy in a's elements
     mv(z->p+an,w->p,wn);    //Copy in w's elements
@@ -174,46 +181,241 @@ A cat(A a, A w) {
 
 //I guess this was never implemented?
 //V2(find){}
+A find(A w) {
+    return w; //Tries to do something reasonable
+}
 
-//Reshape?
+//Reshape
 A rsh(A a, A w) {
     //Changed *a->d to a->d[0] for clarity
-    I r = a->r ? a->d[0] : 1; //
-    I n = tr(r, a->p);  //
-    I wn=tr(w->t, w->r, w->d);
+    //The idea is to use a->p[] as the new dimensions.
+    //This code assumes a is rank-1 or rank-0
+    I r = a->r ? a->d[0] : 1; //New rank. This is either a->d[0] if a has
+                              //rank 1, or 1 if a has rank 0.
+    I n = tr(r, a->p); //New dimensions.
+    I wn= tr(w->r, w->d); //Number of elements in w. We need to know this
+                          //because resphape will replicate w's members
+                          //if the new size is bigger
     
-    A z=ga(w->t,r,a->p);mv(z->p,w->p,wn=n>wn?wn:n);
-    if(n-=wn)mv(z->p+wn,z->p,n);
+    A z = ga(w->t,r,a->p); //Allocate new multidim array
+    
+    //The original implementation was wrong. I have rewritten it.
+    int offset = 0; //Current offset into the destination vector
+    while (offset < n) { 
+        //Loop until we've filled the output with copies of w->p[]                
+        int num_to_transfer = (n > wn) ? wn : n; // = min(wn, n), make sure
+                                                 // that we don'tread past
+                                                 // the end of w->p[]
+        mv(z->p + offset, w->p, num_to_transfer);
+        offset += num_to_transfer;
+    }
+    
+    //Original:
+    // mv(z->p,w->p,wn=n>wn?wn:n); 
+    // if(n-=wn)mv(z->p+wn,z->p,n);
+        
     return z;
 }
 
-//Shape of?
-V1(sha){A z=ga(0,1,&w->r);mv(z->p,w->d,w->r);return z;}
+//Returns the shape of w
+A sha(A w) {
+    //Fairly simple, just constructs a new array whose p array is the 
+    //dimensions of w
+    A z = ga(0,1,&w->r); //The result is a rank-1 array of numbers
+    mv(z->p,w->d,w->r); //Copy w->d[] into the result's data array
+    
+    return z;
+}
 
+//Identity function
+A id(A w) {
+    return w;
+}
 
-V1(id){return w;}V1(size){A z=ga(0,0,0);*z->p=w->r?*w->d:1;return z;}
+//Returns number of cells in w (according to my own definition of a "cell",
+//see the comments in the "from" function)
+A size (A w) {
+    A z = ga(0,0,0); //Make a rank-0 array of numbers
+    
+    //I changed (*w->d) to (w->d[0]) for clarity
+    *z->p = (w->r) ? w->d[0] : 1; //If w has rank 0, then we would say it has 1 cell
+    
+    return z;
+}
 
 //Print an int
-pi(i){printf("%l ",i);}nl(){printf("\n");}
+void pi(I i) {
+    printf(NUM_FORMAT " ", i);
+}
 
-//Print a boxed item
-pr(w)A w;{I r=w->r,*d=w->d,n=tr(r,d);DO(r,pi(d[i]));nl();
- if(w->t)DO(n,printf("< ");pr(w->p[i]))else DO(n,pi(w->p[i]));nl();}
+//Print a newline    
+void nl(void) {
+    printf("\n");
+    fflush(stdout);
+}
 
-char vt[]="+{~<#,";
-A(*vd[])()={0,plus,from,find,0,rsh,cat},
- (*vm[])()={0,id,size,iota,box,sha,0};
-I st[26]; qp(a){return  a>='a'&&a<='z';}qv(a){return a<'a';}
-A ex(e)I *e;{I a=*e;
- if(qp(a)){if(e[1]=='=')return st[a-'a']=ex(e+2);a= st[ a-'a'];}
- return qv(a)?(*vm[a])(ex(e+1)):e[1]?(*vd[e[1]])(a,ex(e+2)):(A)a;}
-noun(c){A z;if(c<'0'||c>'9')return 0;z=ga(0,0,0);*z->p=c-'0';return z;}
-verb(c){I i=0;for(;vt[i];)if(vt[i++]==c)return i;return 0;}
-I *wd(char *s){I a,n=strlen(s),*e=ma(n+1);char c;
- DO(n,e[i]=(a=noun(c=s[i]))?a:(a=verb(c))?a:c);e[n]=0;return e;}
+//Print a multidim array
+void pr(A w){
+    I r=w->r,*d=w->d,n=tr(r,d); //Rank, dimensions, and number of elements
+    
+    //First print out the dimensions
+    int i;
+    for (i = 0; i < r; i++) {
+        pi(d[i]);
+    } 
+    nl();
+    
+    if(w->t) {
+        //Print array of boxed items
+        int i;
+        for (i = 0; i < n; i++) {
+            printf("< ");
+            pr((A) w->p[i]);
+        }
+    } else {
+        //Print the linearized elements
+        int i;
+        for (i = 0; i < n; i++) {
+            pi(w->p[i]);
+        } 
+        nl();
+    }
+}
 
-main(){
+char vt[]="+{~<#,"; //Operators
+
+//Dispatch table for dyadic operators
+A(*vd[])() = {
+    //0,  //Original used 1-indexing for some reason
+    plus, //'+'
+    from, //'{'
+    find, //'~'
+    0,    //'<', does not have dyadic version
+    rsh,  //'#'
+    cat   //','
+};
+
+//Dispatch table for monadic operators
+A(*vm[])() = {
+    //0,  //Original used 1-indexing for some reason
+    id,   //'+'
+    size, //'{'
+    iota, //'~'
+    box,  //'<'
+    sha,  //'#'
+    0     //',', does not have monadic version
+};
+
+A st[26]; //Storage registers, one for each lowercase letter
+
+//Says if char is a lowercase letter (and thus is a variable name)
+//I have no idea why this is called 'qp'
+int qp(I a) {
+    return  a>='a' && a<='z';
+}
+
+//Says if char is less than 'a'. In the array of tokens, anything less than
+//'a' is an operator. (Nouns are pointers to multidim arrays, so they are
+//bigger than 'a', and identifiers are from 'a' to 'z')
+//I don't know why on Earth it's called 'qv'
+int qv(I a) {
+    return a<'a';
+}
+
+//Parse and evaluate an expression. The input is an array of tokens. Each
+//token is either a noun (which is a pointer to a multidim array of rank 0)
+//a verb (an integer from 0 to 5 inclusive), or a raw ASCII code for variable
+//names or the equals operator.
+//Whitespace is not tolerated anywhere in any expressions! This means that 
+//to type out an array, you have to put a bunch of concat operators (',')
+//and painfully copy all that memory. Not efficient!
+A ex(I *e) {
+    I a = e[0];
+    
+    //Check if a is an identifier
+    if(qp(a)) {
+        //If so, check if this is an assignment expressions. Actually, 
+        //because this function returns the LHS, you can chain assignment
+        //with other operations.
+        if(e[1] == '=') {
+            return st[a-'a'] = ex(e+2); //Recursively parse RHS
+        } else {
+            a = (I) st[a-'a']; //Fetch a variable
+        }
+    }
+    
+    if (qv(a)) {
+        //This means a is an operator, and must be monadic. So, run the 
+        //appropriate function on the rest of the expression (which is
+        //recursively parsed)
+        return (*vm[a])(ex(e + 1));
+    } else if (e[1] != -1) {
+        //If there is more than token left, and because the first token 
+        //wasn't an operator, this must be a dyadic expression. (Of course,
+        //like the rest of this code, nothing is checked for invalid input
+        //or errors)
+        return (*vd[e[1]])(a, ex(e + 2));
+    } else {
+        //This means it must be a noun. Return it
+        return (A) a;
+    }
+    
+    //This was the most difficult thing to deobfuscate!
+    //return qv(a)?(*vm[a])(ex(e+1)):e[1]?(*vd[e[1]])(a,ex(e+2)):(A)a;
+}
+
+//Parse a noun (i.e. a literal number)
+//I guess this only supports numbers from 0 to 9 (inclusive). Returns NULL
+//if this is not a noun
+A noun(char c){
+    A z;
+    if(c<'0'||c>'9') return NULL;
+    z=ga(0,0,0); //Rank-zero array of numbers
+    z->p[0] = c-'0'; //"Parse" the integer
+    return z;
+}
+
+//Parse a verb (i.e. a single-character operator from "+{~<#,"
+//Returns -1 to say "this is not a verb" 
+//(note: the original returned zero but I thought that didn't make sense)
+I verb(char c) {
+    int i;
+    for(i = 0; vt[i]; i++) {
+        if(vt[i]==c) return i; //I moved the increment to its natural place
+                               //so that the arrays are zero-indexed
+    }
+    return -1;
+}
+
+I* wd(char *s){
+    I a;
+    I *e = ma(strlen(s)+1);   //Array of tokens with space for sentinel
+    char c;
+    int i;
+    for (i = 0; s[i]; i++) {
+        c = s[i];
+        //More casting between pointers and numbers. Why not use a union?
+        //(This was originall written in the 80s; maybe unions didn't yet
+        //exist?)
+        if ((A)(a = (I) noun(c)) != NULL) {
+            e[i] = a;
+        } else if ((a = verb(c)) >= 0) {
+            e[i] = a;
+        } else {
+            e[i] = c;
+        }
+        
+        //This was the second most difficult thing to deobfuscate!
+        //e[i]=(a=noun(c=s[i]))?a:(a=verb(c))?a:c
+    }
+    e[i] = -1; //Sentinel
+    return e; 
+}
+
+int main(){
     char s[99];
     while(gets(s))
         pr(ex(wd(s)));
+    
+    return 0;
 }
